@@ -2,8 +2,11 @@
 __author__ = 'Roman Solovyev (ZFTurbo), IPPM RAS, https://kaggle.com/zfturbo'
 
 import tensorflow as tf
-from keras.layers import Layer
-from keras import backend as K
+try:
+    from tensorflow.contrib.image import angles_to_projective_transforms, transform
+except:
+    from tensorflow_addons.image.transform_ops import angles_to_projective_transforms
+    from tensorflow_addons.image import transform
 
 
 def to_tuple(param, low=None):
@@ -28,7 +31,7 @@ class HorizontalFlip():
 
     def __call__(self, img, **kwargs):
         batch_size = tf.shape(img)[0]
-        flips = tf.less(tf.random_uniform([batch_size], 0, 1.0, dtype=tf.float32), self.p)
+        flips = tf.less(tf.compat.v1.random_uniform([batch_size], 0, 1.0, dtype=tf.float32), self.p)
         flips = tf.reshape(flips, [batch_size, 1, 1, 1])
         flips = tf.cast(flips, img.dtype)
         flipped_input = tf.reverse(img, [2])
@@ -47,13 +50,12 @@ class VerticalFlip():
 
     def __call__(self, img, **kwargs):
         batch_size = tf.shape(img)[0]
-        flips = tf.less(tf.random_uniform([batch_size], 0, 1.0), self.p)
+        flips = tf.less(tf.compat.v1.random_uniform([batch_size], 0, 1.0), self.p)
         flips = tf.reshape(flips, [batch_size, 1, 1, 1])
         flips = tf.cast(flips, img.dtype)
         flipped_input = tf.reverse(img, [1])
         im = flips * flipped_input + (1 - flips) * img
         return im
-
 
 class RandomRotate():
     """Random rotate image on arbitrary angle
@@ -71,12 +73,12 @@ class RandomRotate():
     def __call__(self, img, **kwargs):
         shp = tf.shape(img)
         batch_size, height, width = shp[0], shp[1], shp[2]
-        coin = tf.less(tf.random_uniform([batch_size], 0, 1.0), self.p)
+        coin = tf.less(tf.compat.v1.random_uniform([batch_size], 0, 1.0), self.p)
         angle_rad = self.angle * 3.141592653589793 / 180.0
-        angles = tf.random_uniform([batch_size], -angle_rad, angle_rad)
+        angles = tf.compat.v1.random_uniform([batch_size], -angle_rad, angle_rad)
         angles *= tf.cast(coin, tf.float32)
-        f = tf.contrib.image.angles_to_projective_transforms(angles, tf.cast(height, tf.float32), tf.cast(width, tf.float32))
-        augm_img = tf.contrib.image.transform(img, f, interpolation='BILINEAR')
+        f = angles_to_projective_transforms(angles, tf.cast(height, tf.float32), tf.cast(width, tf.float32))
+        augm_img = transform(img, f, interpolation='BILINEAR')
         return augm_img
 
 
@@ -91,7 +93,7 @@ class RandomRotate90():
 
     def __call__(self, img, **kwargs):
         batch_size = tf.shape(img)[0]
-        coin = tf.less(tf.random_uniform([batch_size], 0, 1.0, dtype=tf.float32), self.p)
+        coin = tf.less(tf.compat.v1.random_uniform([batch_size], 0, 1.0, dtype=tf.float32), self.p)
         coin = tf.reshape(coin, [batch_size, 1, 1, 1])
         coin = tf.cast(coin, img.dtype)
 
@@ -382,7 +384,7 @@ class RandomGaussNoise():
             def apply_augm(img1):
                 noise_mean = tf.random.uniform([1], self.vl0, self.vl1, dtype=tf.float32)[0]
                 noise_std = noise_mean ** 0.5
-                noise = tf.random_normal(shape=tf.shape(img1), mean=noise_mean, stddev=noise_std, dtype=tf.float32)
+                noise = tf.compat.v1.random_normal(shape=tf.shape(img1), mean=noise_mean, stddev=noise_std, dtype=tf.float32)
                 noise -= tf.reduce_min(noise)
                 img2 = img1 + noise
                 return img2
@@ -446,27 +448,41 @@ def resize_if_needed(img, output_dim):
         img = tf.image.resize(img, size=size)
     return img
 
+def define_layer(keras_from_tf):
+    # Import from tensorflow instead of keras
+    global Layer, K
+    if keras_from_tf:
+        from tensorflow.keras.layers import Layer
+        from tensorflow.keras import backend as K
+    else:
+        from keras.layers import Layer
+        from keras import backend as K
 
-class AugmLayer(Layer):
-    def __init__(self, transforms, output_dim=None, preproc_input=None, **kwargs):
-        self.output_dim = output_dim
-        self.transforms = transforms
-        self.preproc_input = preproc_input
-        super(AugmLayer, self).__init__(**kwargs)
+    class AugmLayerClass(Layer):
+        def __init__(self, transforms, output_dim=None, preproc_input=None, **kwargs):
+            self.output_dim = output_dim
+            self.transforms = transforms
+            self.preproc_input = preproc_input
+            super(AugmLayerClass, self).__init__(**kwargs)
 
-    def build(self, input_shape):
-        super(AugmLayer, self).build(input_shape)
+        def build(self, input_shape):
+            super(AugmLayerClass, self).build(input_shape)
 
-    def call(self, inputs, training=None, **kwargs):
-        ret = K.in_train_phase(augment(inputs, self.transforms), inputs, training=training)
-        if self.output_dim is not None:
-            ret = resize_if_needed(ret, self.output_dim)
-        if self.preproc_input is not None:
-            ret = self.preproc_input(ret)
-        return ret
+        def call(self, inputs, training=None, **kwargs):
+            ret = K.in_train_phase(augment(inputs, self.transforms), inputs, training=training)
+            if self.output_dim is not None:
+                ret = resize_if_needed(ret, self.output_dim)
+            if self.preproc_input is not None:
+                ret = self.preproc_input(ret)
+            return ret
 
-    def compute_output_shape(self, input_shape):
-        if self.output_dim is None:
-            return input_shape
-        else:
-            return (None, ) + self.output_dim
+        def compute_output_shape(self, input_shape):
+            if self.output_dim is None:
+                return input_shape
+            else:
+                return (None, ) + self.output_dim
+
+    return AugmLayerClass
+
+def AugmLayer(transforms, output_dim=None, preproc_input=None, keras_from_tf=False, **kwargs):
+    return define_layer(keras_from_tf)(transforms, output_dim=None, preproc_input=None, **kwargs)
