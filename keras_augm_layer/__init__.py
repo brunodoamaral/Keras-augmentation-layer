@@ -266,6 +266,40 @@ class JpegCompression():
         return augm_img
 
 
+class RandomCropFixedSize():
+    """Random crop of image
+    Args:
+        width_crop (integer)
+        height_crop (integer)
+        ch (integer): number of channels. Default: 3.
+        p (float): probability of applying the transform. Default: 0.5.
+    """
+
+    def __init__(self, width_crop, height_crop, ch=3, p=0.5):
+        self.p = p
+        self.width_crop = width_crop
+        self.height_crop = height_crop
+        self.ch = ch
+
+    def __call__(self, img, **kwargs):
+        def random_crop_single_image(img1):
+    
+            def apply_augm(img1):
+                var = tf.stack([self.height_crop, self.width_crop, self.ch])
+                img2 = tf.image.random_crop(img1, var)
+                # img2 = tf.image.resize(img2, size=(self.height_crop, self.width_crop))
+                return img2
+
+            if self.p == 1:
+                img2 = apply_augm(img1)
+            else:
+                coin = tf.less(tf.random.uniform([1], 0, 1.0), self.p)[0]
+                img2 = tf.cond(coin, lambda: apply_augm(img1), lambda: tf.image.resize(img1, size=(self.height_crop, self.width_crop)))
+            return img2
+
+        augm_img = tf.map_fn(random_crop_single_image, img)
+        return augm_img
+
 class RandomCrop():
     """Random crop of image
     Args:
@@ -298,7 +332,7 @@ class RandomCrop():
                 crop_height = tf.random.uniform([1], min_height_size, max_height_size, dtype=tf.int32)[0]
                 crop_width = tf.random.uniform([1], min_width_size, max_width_size, dtype=tf.int32)[0]
                 var = tf.stack([crop_height, crop_width, ch])
-                img2 = tf.random_crop(img1, var)
+                img2 = tf.image.random_crop(img1, var)
                 img2 = tf.image.resize(img2, size=(height, width))
                 return img2
 
